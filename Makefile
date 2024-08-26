@@ -2,8 +2,10 @@ GO ?= $(shell which go)
 OS ?= $(shell $(GO) env GOOS)
 ARCH ?= $(shell $(GO) env GOARCH)
 
-IMAGE_NAME := "webhook"
-IMAGE_TAG := "latest"
+IMAGE_NAME := ghcr.io/femfirefem/cert-manager-dns-standalone-webhook-image
+IMAGE_TAG := latest
+
+CHART_REPOSITORY := ghcr.io/femfirefem
 
 OUT := $(shell pwd)/_out
 
@@ -35,11 +37,20 @@ build:
 rendered-manifest.yaml: $(OUT)/rendered-manifest.yaml
 
 $(OUT)/rendered-manifest.yaml: $(HELM_FILES) | $(OUT)
-	helm template \
-	    --name cert-manager-dns-standalone-webhook \
-            --set image.repository=$(IMAGE_NAME) \
-            --set image.tag=$(IMAGE_TAG) \
-            deploy/cert-manager-dns-standalone-webhook > $@
+	helm template cert-manager-dns-standalone-webhook \
+		--set image.repository=$(IMAGE_NAME) \
+		--set image.tag=$(IMAGE_TAG) \
+		deploy/cert-manager-dns-standalone-webhook > $@
+
+.PHONY: package
+package:
+	helm package -d _out/ deploy/cert-manager-dns-standalone-webhook/
+
+.PHONY: deploy
+deploy: build package
+	docker push $(IMAGE_NAME):$(IMAGE_TAG)
+	export CHART_VERSION=$(grep 'version:' deploy/cert-manager-dns-standalone-webhook/Chart.yaml | tail -n1 | awk '{ print $2}')
+	helm push _out/cert-manager-dns-standalone-webhook-${CHART_VERSION}.tgz oci://$(CHART_REPOSITORY)
 
 _test $(OUT) _test/kubebuilder-$(KUBEBUILDER_VERSION)-$(OS)-$(ARCH):
 	mkdir -p $@
