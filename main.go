@@ -16,7 +16,7 @@ import (
 
 var GroupName = os.Getenv("GROUP_NAME")
 
-// Externally reachable hostname or IP to reach our dns server on port 53
+// Externally resolvable hostname pointing to our dns server (must reach us on port 53)
 var ExternalServerAddress = os.Getenv("EXTERNAL_SERVER_ADDRESS")
 
 var HostmasterEmailAddress = os.Getenv("HOSTMASTER_EMAIL_ADDRESS")

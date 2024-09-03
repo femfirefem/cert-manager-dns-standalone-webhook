@@ -3,7 +3,7 @@ OS ?= $(shell $(GO) env GOOS)
 ARCH ?= $(shell $(GO) env GOARCH)
 
 IMAGE_NAME := ghcr.io/femfirefem/cert-manager-dns-standalone-webhook-image
-IMAGE_TAG := latest
+IMAGE_TAG := $(shell git describe --abbrev=0 --tags)
 
 CHART_REPOSITORY := ghcr.io/femfirefem
 CHART_VERSION := $(shell grep 'version:' deploy/cert-manager-dns-standalone-webhook/Chart.yaml | tail -n1 | cut -d " " -f 2)
@@ -32,7 +32,7 @@ clean:
 
 .PHONY: build
 build:
-	docker buildx build --platform linux/amd64,linux/arm64 -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
+	docker buildx build --platform linux/amd64,linux/arm64 -t "$(IMAGE_NAME):$(IMAGE_TAG)" -t "$(IMAGE_NAME):latest" .
 
 .PHONY: rendered-manifest.yaml
 rendered-manifest.yaml: $(OUT)/rendered-manifest.yaml
@@ -49,7 +49,7 @@ package:
 
 .PHONY: deploy
 deploy: build package $(HELM_FILES)
-	docker push $(IMAGE_NAME):$(IMAGE_TAG)
+	docker push --all-tags $(IMAGE_NAME)
 	helm push "_out/cert-manager-dns-standalone-webhook-$(CHART_VERSION).tgz" oci://$(CHART_REPOSITORY)
 
 _test $(OUT) _test/kubebuilder-$(KUBEBUILDER_VERSION)-$(OS)-$(ARCH):
