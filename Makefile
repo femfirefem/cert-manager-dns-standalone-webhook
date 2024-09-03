@@ -6,6 +6,7 @@ IMAGE_NAME := ghcr.io/femfirefem/cert-manager-dns-standalone-webhook-image
 IMAGE_TAG := latest
 
 CHART_REPOSITORY := ghcr.io/femfirefem
+CHART_VERSION := $(shell grep 'version:' deploy/cert-manager-dns-standalone-webhook/Chart.yaml | tail -n1 | cut -d " " -f 2)
 
 OUT := $(shell pwd)/_out
 
@@ -31,7 +32,7 @@ clean:
 
 .PHONY: build
 build:
-	docker build -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
+	docker buildx build --platform linux/amd64,linux/arm64 -t "$(IMAGE_NAME):$(IMAGE_TAG)" .
 
 .PHONY: rendered-manifest.yaml
 rendered-manifest.yaml: $(OUT)/rendered-manifest.yaml
@@ -42,15 +43,14 @@ $(OUT)/rendered-manifest.yaml: $(HELM_FILES) | $(OUT)
 		--set image.tag=$(IMAGE_TAG) \
 		deploy/cert-manager-dns-standalone-webhook > $@
 
-.PHONY: package
+.PHONY: package | $(OUT)
 package:
 	helm package -d _out/ deploy/cert-manager-dns-standalone-webhook/
 
 .PHONY: deploy
-deploy: build package
+deploy: build package $(HELM_FILES)
 	docker push $(IMAGE_NAME):$(IMAGE_TAG)
-	export CHART_VERSION=$(grep 'version:' deploy/cert-manager-dns-standalone-webhook/Chart.yaml | tail -n1 | awk '{ print $2}')
-	helm push _out/cert-manager-dns-standalone-webhook-${CHART_VERSION}.tgz oci://$(CHART_REPOSITORY)
+	helm push "_out/cert-manager-dns-standalone-webhook-$(CHART_VERSION).tgz" oci://$(CHART_REPOSITORY)
 
 _test $(OUT) _test/kubebuilder-$(KUBEBUILDER_VERSION)-$(OS)-$(ARCH):
 	mkdir -p $@

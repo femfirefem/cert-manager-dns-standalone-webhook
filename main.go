@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/cert-manager/cert-manager/pkg/acme/webhook"
 	acme "github.com/cert-manager/cert-manager/pkg/acme/webhook/apis/acme/v1alpha1"
@@ -13,6 +15,12 @@ import (
 )
 
 var GroupName = os.Getenv("GROUP_NAME")
+
+// Externally reachable hostname or IP to reach our dns server on port 53
+var ExternalServerAddress = os.Getenv("EXTERNAL_SERVER_ADDRESS")
+
+var HostmasterEmailAddress = os.Getenv("HOSTMASTER_EMAIL_ADDRESS")
+
 var Port = os.Getenv("PORT")
 
 func main() {
@@ -47,6 +55,7 @@ func (e *dnsStandaloneSolver) Present(ch *acme.ChallengeRequest) error {
 	e.Lock()
 	e.txtRecords[ch.ResolvedFQDN] = ch.Key
 	e.Unlock()
+	fmt.Fprintf(os.Stdout, "Presenting %s\n", ch.ResolvedFQDN)
 	return nil
 }
 
@@ -54,6 +63,7 @@ func (e *dnsStandaloneSolver) CleanUp(ch *acme.ChallengeRequest) error {
 	e.Lock()
 	delete(e.txtRecords, ch.ResolvedFQDN)
 	e.Unlock()
+	fmt.Fprintf(os.Stdout, "Cleaned up %s\n", ch.ResolvedFQDN)
 	return nil
 }
 
@@ -88,61 +98,72 @@ func New(port string) webhook.Solver {
 func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Msg) {
 	msg := new(dns.Msg)
 	msg.SetReply(req)
+	var anyWasFound = false
 	switch req.Opcode {
 	case dns.OpcodeQuery:
 		for _, q := range msg.Question {
-			if err := e.addDNSAnswer(q, msg, req); err != nil {
-				msg.SetRcode(req, dns.RcodeServerFailure)
-				break
+			fmt.Fprintf(os.Stdout, "Received DNS query: %s\n", q.String())
+			var lowerQName = strings.ToLower(q.Name)
+			var isAcmeChallenge = strings.HasPrefix(lowerQName, "_acme-challenge.")
+			e.RLock()
+			record, found := e.txtRecords[lowerQName]
+			e.RUnlock()
+			msg.Authoritative = found && isAcmeChallenge
+			if isAcmeChallenge {
+				anyWasFound = true
+				if q.Qtype == dns.TypeTXT {
+					if !found {
+						msg.SetRcode(req, dns.RcodeNameError)
+						continue
+					}
+					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)) != nil {
+						break
+					}
+				} else if q.Qtype == dns.TypeNS {
+					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN NS %s", q.Name, ExternalServerAddress)) != nil {
+						break
+					}
+				} else if q.Qtype == dns.TypeSOA {
+					if e.tryAppendRR(msg, req, getSoaRecord(q.Name)) != nil {
+						break
+					}
+				} else {
+					rr, err := dns.NewRR(getSoaRecord(q.Name))
+					if err != nil {
+						msg.SetRcode(req, dns.RcodeServerFailure)
+						break
+					} else {
+						msg.Ns = append(msg.Ns, rr)
+					}
+					msg.SetRcode(req, dns.RcodeNameError)
+				}
+			} else {
+				msg.SetRcode(req, dns.RcodeNameError)
 			}
 		}
 	}
-	w.WriteMsg(msg)
+	if anyWasFound {
+		w.WriteMsg(msg)
+	}
 }
 
-func (e *dnsStandaloneSolver) addDNSAnswer(q dns.Question, msg *dns.Msg, req *dns.Msg) error {
-	switch q.Qtype {
-	// Always return loopback for any A query
-	case dns.TypeA:
-		rr, err := dns.NewRR(fmt.Sprintf("%s 5 IN A 127.0.0.1", q.Name))
-		if err != nil {
-			return err
-		}
-		msg.Answer = append(msg.Answer, rr)
-		return nil
+func getSoaRecord(name string) string {
+	var rname = strings.Replace(HostmasterEmailAddress, "@", ".", 1)
+	if len(HostmasterEmailAddress) == 0 {
+		HostmasterEmailAddress = ExternalServerAddress
+	}
+	// name ttl recordtype mname rname serial refresh retry expire ttl
+	return fmt.Sprintf("%s 5 IN SOA %s %s %d %d %d %d %d",
+		name, ExternalServerAddress, rname, time.Now().Unix(), 5, 5, 1209600, 5)
+}
 
-	// TXT records are the only important record for ACME dns-01 challenges
-	case dns.TypeTXT:
-		e.RLock()
-		record, found := e.txtRecords[q.Name]
-		e.RUnlock()
-		if !found {
-			msg.SetRcode(req, dns.RcodeNameError)
-			return nil
-		}
-		rr, err := dns.NewRR(fmt.Sprintf("%s 5 IN TXT %s", q.Name, record))
-		if err != nil {
-			return err
-		}
+func (e *dnsStandaloneSolver) tryAppendRR(msg *dns.Msg, req *dns.Msg, s string) error {
+	rr, err := dns.NewRR(s)
+	if err != nil {
+		msg.SetRcode(req, dns.RcodeServerFailure)
+		return err
+	} else {
 		msg.Answer = append(msg.Answer, rr)
 		return nil
-
-	// NS and SOA are for authoritative lookups, return obviously invalid data
-	case dns.TypeNS:
-		rr, err := dns.NewRR(fmt.Sprintf("%s 5 IN NS ns.example-acme-webook.invalid.", q.Name))
-		if err != nil {
-			return err
-		}
-		msg.Answer = append(msg.Answer, rr)
-		return nil
-	case dns.TypeSOA:
-		rr, err := dns.NewRR(fmt.Sprintf("%s 5 IN SOA %s 20 5 5 5 5", "ns.example-acme-webook.invalid.", "ns.example-acme-webook.invalid."))
-		if err != nil {
-			return err
-		}
-		msg.Answer = append(msg.Answer, rr)
-		return nil
-	default:
-		return fmt.Errorf("unimplemented record type %v", q.Qtype)
 	}
 }
