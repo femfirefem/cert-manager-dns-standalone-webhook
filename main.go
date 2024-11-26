@@ -124,11 +124,11 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			if found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
 				anyWasFound = true
 				if q.Qtype == dns.TypeNS {
-					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN NS %s", q.Name, ExternalServerAddress)) != nil {
+					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN NS %s", AcmeServerAddress, ExternalServerAddress)) != nil {
 						break
 					}
 				} else if q.Qtype == dns.TypeSOA {
-					if e.tryAppendRR(msg, req, getSoaRecord(q.Name)) != nil {
+					if e.tryAppendRR(msg, req, getSoaRecord()) != nil {
 						break
 					}
 				} else {
@@ -141,7 +141,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 							break
 						}
 					} else {
-						rr, err := dns.NewRR(getSoaRecord(q.Name))
+						rr, err := dns.NewRR(getSoaRecord())
 						if err != nil {
 							msg.SetRcode(req, dns.RcodeServerFailure)
 							break
@@ -161,14 +161,11 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 	}
 }
 
-func getSoaRecord(name string) string {
+func getSoaRecord() string {
 	var rname = strings.Replace(HostmasterEmailAddress, "@", ".", 1)
-	if len(HostmasterEmailAddress) == 0 {
-		HostmasterEmailAddress = strings.TrimSuffix(ExternalServerAddress, ".")
-	}
 	// name ttl recordtype mname rname serial refresh retry expire ttl
 	return fmt.Sprintf("%s 5 IN SOA %s %s %d %d %d %d %d",
-		name, ExternalServerAddress, rname, time.Now().Unix(), 5, 5, 1209600, 5)
+		AcmeServerAddress, ExternalServerAddress, rname, time.Now().Unix(), 5, 5, 1209600, 5)
 }
 
 func (e *dnsStandaloneSolver) tryAppendRR(msg *dns.Msg, req *dns.Msg, s string) error {
