@@ -12,7 +12,7 @@ certManager:
 
 image:
   repository: ghcr.io/femfirefem/cert-manager-dns-standalone-webhook-image
-  tag: v0.1.5
+  tag: v0.1.6
   pullPolicy: IfNotPresent
   #pullPolicy: Always
 

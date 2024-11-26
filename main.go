@@ -109,15 +109,14 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+ExternalServerAddress) {
 				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress)
 			}
-			// Check .acme. forwarded lookups
-			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
-			}
+			// Check NS/SOA forwarded lookups for acme root
+			var isAcmeRootNsOrSoa = !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) &&
+				(q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
 			msg.Authoritative = found && isAcmeChallenge
-			if isAcmeChallenge {
+			if isAcmeChallenge || isAcmeRootNsOrSoa {
 				anyWasFound = true
 				if q.Qtype == dns.TypeTXT {
 					if !found {
