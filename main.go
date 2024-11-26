@@ -123,15 +123,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			msg.Authoritative = found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName)
 			if found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
 				anyWasFound = true
-				if found && q.Qtype == dns.TypeTXT {
-					if !found {
-						msg.SetRcode(req, dns.RcodeNameError)
-						continue
-					}
-					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)) != nil {
-						break
-					}
-				} else if q.Qtype == dns.TypeNS {
+				if q.Qtype == dns.TypeNS {
 					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN NS %s", q.Name, ExternalServerAddress)) != nil {
 						break
 					}
@@ -140,14 +132,24 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 						break
 					}
 				} else {
-					rr, err := dns.NewRR(getSoaRecord(q.Name))
-					if err != nil {
-						msg.SetRcode(req, dns.RcodeServerFailure)
-						break
-					} else {
-						msg.Ns = append(msg.Ns, rr)
+					if !found {
+						msg.SetRcode(req, dns.RcodeNameError)
+						continue
 					}
-					msg.SetRcode(req, dns.RcodeNameError)
+					if q.Qtype == dns.TypeTXT {
+						if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)) != nil {
+							break
+						}
+					} else {
+						rr, err := dns.NewRR(getSoaRecord(q.Name))
+						if err != nil {
+							msg.SetRcode(req, dns.RcodeServerFailure)
+							break
+						} else {
+							msg.Ns = append(msg.Ns, rr)
+						}
+					}
+					msg.SetRcode(req, dns.RcodeSuccess)
 				}
 			} else {
 				msg.SetRcode(req, dns.RcodeNameError)
