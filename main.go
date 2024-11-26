@@ -105,26 +105,25 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			fmt.Fprintf(os.Stdout, "Received DNS query: %s\n", q.String())
 			var lowerQName = strings.ToLower(q.Name)
 			isAcmeChallenge := strings.HasPrefix(lowerQName, "_acme-challenge.")
-			// Check CNAME forwarded lookups
-			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+ExternalServerAddress) {
+			isUnderExternal := strings.HasSuffix(lowerQName, "."+ExternalServerAddress)
+			isUnderAcmeRoot := strings.HasSuffix(lowerQName, "."+AcmeServerAddress)
+			isAcmeRootNsOrSoa := !isAcmeChallenge && isUnderAcmeRoot && (q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
+			isAcmeSubdomainCName := !isAcmeChallenge && isUnderAcmeRoot && q.Qtype == dns.TypeCNAME
+
+			// Update lowerQName if under external or acme root, so it can match txtRecords
+			if !isAcmeChallenge && isUnderExternal {
 				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress)
-			}
-			// Check NS/SOA forwarded lookups for acme root
-			var isAcmeRootNsOrSoa = !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) &&
-				(q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
-			// Check CNAME lookup of acme subdomain
-			var isAcmeSubdomainCName = false
-			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) && q.Qtype == dns.TypeCNAME {
+			} else if !isAcmeChallenge && isUnderAcmeRoot {
 				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
-				isAcmeSubdomainCName = true
 			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
-			msg.Authoritative = found && (isAcmeChallenge || isAcmeSubdomainCName)
-			if isAcmeChallenge || isAcmeRootNsOrSoa || isAcmeSubdomainCName {
+
+			msg.Authoritative = found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName)
+			if found && (isAcmeChallenge || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
 				anyWasFound = true
-				if q.Qtype == dns.TypeTXT {
+				if found && q.Qtype == dns.TypeTXT {
 					if !found {
 						msg.SetRcode(req, dns.RcodeNameError)
 						continue
@@ -141,13 +140,6 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 						break
 					}
 				} else {
-					rr, err := dns.NewRR(getSoaRecord(q.Name))
-					if err != nil {
-						msg.SetRcode(req, dns.RcodeServerFailure)
-						break
-					} else {
-						msg.Ns = append(msg.Ns, rr)
-					}
 					msg.SetRcode(req, dns.RcodeNameError)
 				}
 			} else {
