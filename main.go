@@ -17,7 +17,7 @@ import (
 var GroupName = os.Getenv("GROUP_NAME")
 
 // Externally resolvable hostname pointing to our dns server (must reach us on port 53)
-var ExternalServerAddress = os.Getenv("EXTERNAL_SERVER_ADDRESS")
+var ExternalServerAddress = strings.Trim(os.Getenv("EXTERNAL_SERVER_ADDRESS"), ".") + "."
 
 var HostmasterEmailAddress = os.Getenv("HOSTMASTER_EMAIL_ADDRESS")
 
@@ -104,7 +104,15 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 		for _, q := range msg.Question {
 			fmt.Fprintf(os.Stdout, "Received DNS query: %s\n", q.String())
 			var lowerQName = strings.ToLower(q.Name)
-			var isAcmeChallenge = strings.HasPrefix(lowerQName, "_acme-challenge.")
+			isAcmeChallenge := strings.HasPrefix(lowerQName, "_acme-challenge.")
+			// Check CNAME forwarded lookups
+			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+ExternalServerAddress) {
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress)
+			}
+			// Check .acme. forwarded lookups
+			if !isAcmeChallenge && strings.HasSuffix(lowerQName, ".acme."+ExternalServerAddress) {
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, ".acme."+ExternalServerAddress)
+			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
@@ -150,7 +158,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 func getSoaRecord(name string) string {
 	var rname = strings.Replace(HostmasterEmailAddress, "@", ".", 1)
 	if len(HostmasterEmailAddress) == 0 {
-		HostmasterEmailAddress = ExternalServerAddress
+		HostmasterEmailAddress = strings.TrimSuffix(ExternalServerAddress, ".")
 	}
 	// name ttl recordtype mname rname serial refresh retry expire ttl
 	return fmt.Sprintf("%s 5 IN SOA %s %s %d %d %d %d %d",
