@@ -112,11 +112,17 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			// Check NS/SOA forwarded lookups for acme root
 			var isAcmeRootNsOrSoa = !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) &&
 				(q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
+			// Check CNAME lookup of acme subdomain
+			var isAcmeSubdomainCName = false
+			if isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) && q.Qtype == dns.TypeCNAME {
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
+				isAcmeSubdomainCName = true
+			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
 			msg.Authoritative = found && isAcmeChallenge
-			if isAcmeChallenge || isAcmeRootNsOrSoa {
+			if isAcmeChallenge || isAcmeRootNsOrSoa || isAcmeSubdomainCName {
 				anyWasFound = true
 				if q.Qtype == dns.TypeTXT {
 					if !found {
