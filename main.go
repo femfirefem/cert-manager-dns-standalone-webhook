@@ -18,7 +18,7 @@ var GroupName = os.Getenv("GROUP_NAME")
 
 // Externally resolvable hostname pointing to our dns server (must reach us on port 53)
 var ExternalServerAddress = strings.Trim(os.Getenv("EXTERNAL_SERVER_ADDRESS"), ".") + "."
-
+var AcmeServerAddress = strings.Trim(os.Getenv("ACME_NS_ROOT_ADDRESS"), ".") + "."
 var HostmasterEmailAddress = os.Getenv("HOSTMASTER_EMAIL_ADDRESS")
 
 var Port = os.Getenv("PORT")
@@ -110,8 +110,8 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress)
 			}
 			// Check .acme. forwarded lookups
-			if !isAcmeChallenge && strings.HasSuffix(lowerQName, ".acme."+ExternalServerAddress) {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, ".acme."+ExternalServerAddress)
+			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) {
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
 			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
