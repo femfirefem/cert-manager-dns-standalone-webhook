@@ -114,7 +114,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 				(q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
 			// Check CNAME lookup of acme subdomain
 			var isAcmeSubdomainCName = false
-			if isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) && q.Qtype == dns.TypeCNAME {
+			if !isAcmeChallenge && strings.HasSuffix(lowerQName, "."+AcmeServerAddress) && q.Qtype == dns.TypeCNAME {
 				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
 				isAcmeSubdomainCName = true
 			}
