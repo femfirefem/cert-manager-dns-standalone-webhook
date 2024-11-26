@@ -18,7 +18,7 @@ var GroupName = os.Getenv("GROUP_NAME")
 
 // Externally resolvable hostname pointing to our dns server (must reach us on port 53)
 var ExternalServerAddress = strings.Trim(os.Getenv("EXTERNAL_SERVER_ADDRESS"), ".") + "."
-var AcmeServerAddress = strings.Trim(os.Getenv("ACME_NS_ROOT_ADDRESS"), ".") + "."
+var AuthorativeZoneName = strings.Trim(os.Getenv("AUTHORATIVE_ZONE_NAME"), ".") + "."
 var HostmasterEmailAddress = os.Getenv("HOSTMASTER_EMAIL_ADDRESS")
 
 var Port = os.Getenv("PORT")
@@ -105,52 +105,53 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			fmt.Fprintf(os.Stdout, "Received DNS query: %s\n", q.String())
 			var lowerQName = strings.ToLower(q.Name)
 			isAcmeChallenge := strings.HasPrefix(lowerQName, "_acme-challenge.")
-			isUnderExternal := strings.HasSuffix(lowerQName, "."+ExternalServerAddress)
-			isUnderAcmeRoot := strings.HasSuffix(lowerQName, "."+AcmeServerAddress)
-			isAcmeRootNsOrSoa := !isAcmeChallenge && isUnderAcmeRoot && (q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
-			isAcmeSubdomainCName := !isAcmeChallenge && isUnderAcmeRoot && q.Qtype == dns.TypeCNAME
+			isUnderAuthorative := strings.HasSuffix(lowerQName, "."+AuthorativeZoneName)
+			isAuthorativeZone := lowerQName == AuthorativeZoneName
+			isAuthorativeNsOrSoa := !isAcmeChallenge && (isUnderAuthorative || isAuthorativeZone) && (q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
+			isAcmeSubdomainCName := !isAcmeChallenge && isUnderAuthorative && q.Qtype == dns.TypeCNAME
 
 			// Update lowerQName if under external or acme root, so it can match txtRecords
-			if !isAcmeChallenge && isUnderExternal {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress) + "."
-			} else if !isAcmeChallenge && isUnderAcmeRoot {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress) + "."
+			if !isAcmeChallenge && isUnderAuthorative {
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AuthorativeZoneName) + "."
 			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
 
-			msg.Authoritative = found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName)
-			if found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
+			// Add "aa" to "flags" if acme challenge found or the request is under our authorative zone
+			msg.Authoritative = found && isAcmeChallenge || isAuthorativeZone || isUnderAuthorative
+
+			// Whether we should respond at all to this request or not
+			if found && (isAcmeChallenge || isAcmeSubdomainCName) || isAuthorativeNsOrSoa {
 				anyWasFound = true
+				// If not NS or SOA, and not found in txtRecords, set name error and continue
+				if !isAuthorativeNsOrSoa && !found {
+					msg.SetRcode(req, dns.RcodeNameError)
+					continue
+				}
+
+				var responseRecord = getSoaRecord()
 				if q.Qtype == dns.TypeNS {
-					if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN NS %s", AcmeServerAddress, ExternalServerAddress)) != nil {
+					responseRecord = getNsRecord()
+				} else if found && q.Qtype == dns.TypeTXT {
+					responseRecord = fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)
+				}
+
+				if isAcmeChallenge && found || isAuthorativeZone {
+					if e.tryAppendAnswer(msg, req, responseRecord) != nil {
 						break
 					}
-				} else if q.Qtype == dns.TypeSOA {
-					if e.tryAppendRR(msg, req, getSoaRecord()) != nil {
+				} else if isUnderAuthorative {
+					if e.tryAppendNs(msg, req, responseRecord) != nil {
 						break
 					}
 				} else {
-					if !found {
-						msg.SetRcode(req, dns.RcodeNameError)
-						continue
-					}
-					if q.Qtype == dns.TypeTXT {
-						if e.tryAppendRR(msg, req, fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)) != nil {
-							break
-						}
-					} else {
-						rr, err := dns.NewRR(getSoaRecord())
-						if err != nil {
-							msg.SetRcode(req, dns.RcodeServerFailure)
-							break
-						} else {
-							msg.Ns = append(msg.Ns, rr)
-						}
-					}
-					msg.SetRcode(req, dns.RcodeSuccess)
+					// Should not end up here
+					msg.SetRcode(req, dns.RcodeServerFailure)
+					break
 				}
+
+				msg.SetRcode(req, dns.RcodeSuccess)
 			} else {
 				msg.SetRcode(req, dns.RcodeNameError)
 			}
@@ -161,20 +162,35 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 	}
 }
 
+func getNsRecord() string {
+	return fmt.Sprintf("%s 5 IN NS %s", AuthorativeZoneName, ExternalServerAddress)
+}
+
 func getSoaRecord() string {
 	var rname = strings.Replace(HostmasterEmailAddress, "@", ".", 1)
 	// name ttl recordtype mname rname serial refresh retry expire ttl
 	return fmt.Sprintf("%s 5 IN SOA %s %s %d %d %d %d %d",
-		AcmeServerAddress, ExternalServerAddress, rname, time.Now().Unix(), 5, 5, 1209600, 5)
+		AuthorativeZoneName, ExternalServerAddress, rname, time.Now().Unix(), 5, 5, 1209600, 5)
 }
 
-func (e *dnsStandaloneSolver) tryAppendRR(msg *dns.Msg, req *dns.Msg, s string) error {
+func (e *dnsStandaloneSolver) tryAppendAnswer(msg *dns.Msg, req *dns.Msg, s string) error {
 	rr, err := dns.NewRR(s)
 	if err != nil {
 		msg.SetRcode(req, dns.RcodeServerFailure)
 		return err
 	} else {
 		msg.Answer = append(msg.Answer, rr)
+		return nil
+	}
+}
+
+func (e *dnsStandaloneSolver) tryAppendNs(msg *dns.Msg, req *dns.Msg, s string) error {
+	rr, err := dns.NewRR(s)
+	if err != nil {
+		msg.SetRcode(req, dns.RcodeServerFailure)
+		return err
+	} else {
+		msg.Ns = append(msg.Ns, rr)
 		return nil
 	}
 }

@@ -39,8 +39,8 @@ spec:
               value: {{ .Values.groupName | quote }}
             - name: EXTERNAL_SERVER_ADDRESS
               value: {{ .Values.externalServerAddress | quote }}
-            - name: ACME_NS_ROOT_ADDRESS
-              value: {{ .Values.acmeNsRootAddress | quote }}
+            - name: AUTHORATIVE_ZONE_NAME
+              value: {{ .Values.authorativeZoneName | quote }}
             - name: HOSTMASTER_EMAIL_ADDRESS
               value: {{ .Values.hostmasterEmailAddress | quote }}
           ports:
