@@ -121,7 +121,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
-			msg.Authoritative = found && isAcmeChallenge
+			msg.Authoritative = found && (isAcmeChallenge || isAcmeSubdomainCName)
 			if isAcmeChallenge || isAcmeRootNsOrSoa || isAcmeSubdomainCName {
 				anyWasFound = true
 				if q.Qtype == dns.TypeTXT {
