@@ -112,16 +112,16 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 
 			// Update lowerQName if under external or acme root, so it can match txtRecords
 			if !isAcmeChallenge && isUnderExternal {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress)
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+ExternalServerAddress) + "."
 			} else if !isAcmeChallenge && isUnderAcmeRoot {
-				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress)
+				lowerQName = "_acme-challenge." + strings.TrimSuffix(lowerQName, "."+AcmeServerAddress) + "."
 			}
 			e.RLock()
 			record, found := e.txtRecords[lowerQName]
 			e.RUnlock()
 
 			msg.Authoritative = found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName)
-			if found && (isAcmeChallenge || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
+			if found && (isAcmeChallenge || isUnderExternal || isAcmeSubdomainCName) || isAcmeRootNsOrSoa {
 				anyWasFound = true
 				if found && q.Qtype == dns.TypeTXT {
 					if !found {
