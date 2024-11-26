@@ -140,6 +140,13 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 						break
 					}
 				} else {
+					rr, err := dns.NewRR(getSoaRecord(q.Name))
+					if err != nil {
+						msg.SetRcode(req, dns.RcodeServerFailure)
+						break
+					} else {
+						msg.Ns = append(msg.Ns, rr)
+					}
 					msg.SetRcode(req, dns.RcodeNameError)
 				}
 			} else {
