@@ -108,7 +108,6 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			isUnderAuthorative := strings.HasSuffix(lowerQName, "."+AuthorativeZoneName)
 			isAuthorativeZone := lowerQName == AuthorativeZoneName
 			isAuthorativeNsOrSoa := !isAcmeChallenge && (isUnderAuthorative || isAuthorativeZone) && (q.Qtype == dns.TypeNS || q.Qtype == dns.TypeSOA)
-			isAcmeSubdomainCName := !isAcmeChallenge && isUnderAuthorative && q.Qtype == dns.TypeCNAME
 
 			// Update lowerQName if under external or acme root, so it can match txtRecords
 			if !isAcmeChallenge && isUnderAuthorative {
@@ -122,7 +121,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			msg.Authoritative = found && isAcmeChallenge || isAuthorativeZone || isUnderAuthorative
 
 			// Whether we should respond at all to this request or not
-			if found && (isAcmeChallenge || isAcmeSubdomainCName) || isAuthorativeNsOrSoa {
+			if found && isAcmeChallenge || isUnderAuthorative || isAuthorativeZone {
 				anyWasFound = true
 				// If not NS or SOA, and not found in txtRecords, set name error and continue
 				if !isAuthorativeNsOrSoa && !found {
