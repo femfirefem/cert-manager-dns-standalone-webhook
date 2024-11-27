@@ -124,7 +124,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 			if found && isAcmeChallenge || isUnderAuthorative || isAuthorativeZone {
 				anyWasFound = true
 				// If not NS or SOA, and not found in txtRecords, set name error and continue
-				if !isAuthorativeNsOrSoa && !found {
+				if !isAuthorativeNsOrSoa && !isAuthorativeZone && !found {
 					msg.SetRcode(req, dns.RcodeNameError)
 					continue
 				}
@@ -134,9 +134,11 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 					responseRecord = getNsRecord()
 				} else if found && q.Qtype == dns.TypeTXT {
 					responseRecord = fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)
+				} else if !found && (q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA) {
+					msg.SetRcode(req, dns.RcodeFormatError)
 				}
 
-				if isAcmeChallenge && found || isAuthorativeZone {
+				if (isAcmeChallenge || isUnderAuthorative) && found || isAuthorativeZone {
 					if e.tryAppendAnswer(msg, req, responseRecord) != nil {
 						break
 					}
