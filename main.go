@@ -131,7 +131,7 @@ func (e *dnsStandaloneSolver) handleDNSRequest(w dns.ResponseWriter, req *dns.Ms
 				}
 
 				var responseRecord = getSoaRecord()
-				if q.Qtype == dns.TypeNS {
+				if q.Qtype == dns.TypeNS && isAuthorativeZone {
 					responseRecord = getNsRecord()
 				} else if found && q.Qtype == dns.TypeTXT {
 					responseRecord = fmt.Sprintf("%s 5 IN TXT %s", q.Name, record)
